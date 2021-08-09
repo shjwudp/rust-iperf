@@ -5,4 +5,16 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+path = "src/server.rs"
+name = "server"
+
+[[bin]]
+path = "src/client.rs"
+name = "client"
+
 [dependencies]
+argparse = "0.2.2"
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.0"
+pbr = "1.0"
