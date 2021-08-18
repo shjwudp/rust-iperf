@@ -59,7 +59,7 @@ pub fn nonblocking_read_exact(
 fn main() {
     let mut address = "0.0.0.0".to_string();
     let mut num_of_socks = 1;
-    const BUCKET_SIZE: usize = 1 * 1024 * 1024;
+    const BUCKET_SIZE: usize = 1 * (1024 as usize).pow(3);
     {
         // this block limits scope of borrows by ap.refer() method
         let mut ap = ArgumentParser::new();
@@ -94,10 +94,13 @@ fn main() {
                     stream.set_nodelay(true).unwrap();
                     stream.set_nonblocking(true).unwrap();
 
-                    for _ in 0..10000 {
-                        let target_nbytes = BUCKET_SIZE.to_be_bytes();
-                        nonblocking_write_all(&mut stream, &target_nbytes[..]).unwrap();
-                        nonblocking_write_all(&mut stream, &bucket[..BUCKET_SIZE]).unwrap();
+                    let repeat = 10000;
+                    for _ in 0..repeat {
+                        let mut target_nbytes = BUCKET_SIZE.to_be_bytes();
+                        nonblocking_read_exact(&mut stream, &mut target_nbytes[..]).unwrap();
+                        let target_nbytes = usize::from_be_bytes(target_nbytes);
+                        nonblocking_read_exact(&mut stream, &mut bucket[..target_nbytes])
+                            .unwrap();
                     }
 
                     true

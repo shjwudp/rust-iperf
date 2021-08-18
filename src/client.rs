@@ -8,6 +8,25 @@ use std::net::{Shutdown, TcpStream};
 use std::time::{Duration, Instant, SystemTime};
 use pbr::ProgressBar;
 
+pub fn nonblocking_write_all(stream: &mut std::net::TcpStream, mut buf: &[u8]) -> io::Result<()> {
+    while !buf.is_empty() {
+        match stream.write(buf) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "failed to write whole buffer",
+                ));
+            }
+            Ok(n) => buf = &buf[n..],
+            Err(ref e)
+                if e.kind() == io::ErrorKind::Interrupted
+                    || e.kind() == io::ErrorKind::WouldBlock => {}
+            Err(e) => return Err(e),
+        }
+        std::thread::yield_now();
+    }
+    Ok(())
+}
 
 pub fn nonblocking_read_exact(
     stream: &mut std::net::TcpStream,
@@ -40,20 +59,22 @@ pub fn nonblocking_read_exact(
 fn main() {
     let mut address = "127.0.0.1:63590".to_string();
     let mut num_of_socks = 1;
-    const BUCKET_SIZE: usize = 20 * 1024 * 1024;
+    let mut bucket_size: usize = 1 * (1024 as usize).pow(2);
     {
         // this block limits scope of borrows by ap.refer() method
         let mut ap = ArgumentParser::new();
         ap.set_description("tcp server.");
         ap.refer(&mut address)
             .add_option(&["--server_address"], Store, "Server address");
+        ap.refer(&mut bucket_size)
+            .add_option(&["--bucket_size"], Store, "Bucket size");
         ap.parse_args_or_exit();
     }
 
     let mut workers = Vec::new();
     for _ in 0..num_of_socks {
         let server_address = address.clone();
-        let mut bucket: Vec<u8> = vec![0; BUCKET_SIZE];
+        let mut bucket: Vec<u8> = vec![0; bucket_size];
         workers.push(std::thread::spawn(move || {
             let work_type = WorkType::Recv;
             match TcpStream::connect(server_address.clone()) {
@@ -61,19 +82,22 @@ fn main() {
                     stream.set_nodelay(true).unwrap();
                     stream.set_nonblocking(true).unwrap();
 
-                    let now = Instant::now();
-                    let mut recv_nbytes: usize = 0;
-                    for _ in 0..10000 {
-                        let mut target_nbytes = BUCKET_SIZE.to_be_bytes();
-                        nonblocking_read_exact(&mut stream, &mut target_nbytes[..]).unwrap();
-                        let target_nbytes = usize::from_be_bytes(target_nbytes);
-                        nonblocking_read_exact(&mut stream, &mut bucket[..target_nbytes])
-                            .unwrap();
+                    let repeat = 10000;
+                    let mut pb = ProgressBar::new(repeat);
 
-                        recv_nbytes += target_nbytes;
+                    let now = Instant::now();
+                    let mut send_nbytes: usize = 0;
+                    for _ in 0..10000 {
+                        let target_nbytes = bucket_size.to_be_bytes();
+                        nonblocking_write_all(&mut stream, &target_nbytes[..]).unwrap();
+                        nonblocking_write_all(&mut stream, &bucket[..bucket_size]).unwrap();
+
+                        send_nbytes += bucket_size;
+                        pb.inc();
                     }
+                    pb.finish();
                     println!("now.elapsed().as_secs_f64()={}", now.elapsed().as_secs_f64());
-                    let total_ngbs = recv_nbytes as f64 / (1024. as f64).powf(3.);
+                    let total_ngbs = send_nbytes as f64 / (1024. as f64).powf(3.);
                     println!(
                         "speed={}, it will be shutdown!",
                         total_ngbs / now.elapsed().as_secs_f64()
