@@ -2,15 +2,45 @@ pub mod proto;
 
 use crate::proto::{PerfRequest, WorkType};
 use argparse::{ArgumentParser, Store, StoreTrue};
+use std::io;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::time::{Duration, Instant, SystemTime};
 use pbr::ProgressBar;
 
+
+pub fn nonblocking_read_exact(
+    stream: &mut std::net::TcpStream,
+    mut buf: &mut [u8],
+) -> io::Result<()> {
+    while !buf.is_empty() {
+        match stream.read(buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                let tmp = buf;
+                buf = &mut tmp[n..];
+            }
+            Err(ref e)
+                if e.kind() == io::ErrorKind::Interrupted
+                    || e.kind() == io::ErrorKind::WouldBlock => {}
+            Err(e) => return Err(e),
+        }
+        std::thread::yield_now();
+    }
+    if !buf.is_empty() {
+        Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "failed to fill whole buffer",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 fn main() {
     let mut address = "127.0.0.1:63590".to_string();
     let mut num_of_socks = 1;
-    const bucket_size: usize = 1 * 1024 * 1024;
+    const BUCKET_SIZE: usize = 20 * 1024 * 1024;
     {
         // this block limits scope of borrows by ap.refer() method
         let mut ap = ArgumentParser::new();
@@ -23,53 +53,31 @@ fn main() {
     let mut workers = Vec::new();
     for _ in 0..num_of_socks {
         let server_address = address.clone();
-        let bucket: Vec<u8> = vec![0; bucket_size];
+        let mut bucket: Vec<u8> = vec![0; BUCKET_SIZE];
         workers.push(std::thread::spawn(move || {
             let work_type = WorkType::Recv;
             match TcpStream::connect(server_address.clone()) {
-                Ok(mut tcp_stream) => {
-                    println!("Successfully connected to server in {}", server_address);
-
-                    let msg: Vec<u8> = bincode::serialize(&PerfRequest {
-                        work_type: work_type.clone(),
-                    })
-                    .unwrap();
-                    let nbytes = tcp_stream.write(&msg).unwrap();
-                    println!("Sent nbytes={}, awaiting reply...", nbytes);
+                Ok(mut stream) => {
+                    stream.set_nodelay(true).unwrap();
+                    stream.set_nonblocking(true).unwrap();
 
                     let now = Instant::now();
-                    // let mut data = [0 as u8; 6]; // using 6 byte buffer
-                    let mut data = vec![0 as u8; bucket_size];
-                    let mut total_nbytes: u64 = 0;
-                    let target_nbytes = 10 * (1024 as u64).pow(3);
-                    let pbr_count = 1000;
-                    let pbr_unit = target_nbytes as f64 / pbr_count as f64;
-                    let mut pbr_id = 0;
-                    let mut pb = ProgressBar::new(pbr_count);
-                    for _ in 0..target_nbytes {
-                        let nbytes = match work_type {
-                            WorkType::Send => tcp_stream.read(&mut data[..]).unwrap(),
-                            _ => tcp_stream.write(&data[..]).unwrap(),
-                        } as u64;
+                    let mut recv_nbytes: usize = 0;
+                    for _ in 0..10000 {
+                        let mut target_nbytes = BUCKET_SIZE.to_be_bytes();
+                        nonblocking_read_exact(&mut stream, &mut target_nbytes[..]).unwrap();
+                        let target_nbytes = usize::from_be_bytes(target_nbytes);
+                        nonblocking_read_exact(&mut stream, &mut bucket[..target_nbytes])
+                            .unwrap();
 
-                        total_nbytes += nbytes;
-                        while pbr_id < pbr_count && pbr_id as f64 * pbr_unit <= total_nbytes as f64 {
-                            pb.inc();
-                            pbr_id += 1;
-                        }
-
-                        if total_nbytes >= target_nbytes {
-                            break;
-                        }
+                        recv_nbytes += target_nbytes;
                     }
-                    pb.finish();
                     println!("now.elapsed().as_secs_f64()={}", now.elapsed().as_secs_f64());
-                    let total_ngbs = total_nbytes as f64 / (1024. as f64).powf(3.);
+                    let total_ngbs = recv_nbytes as f64 / (1024. as f64).powf(3.);
                     println!(
                         "speed={}, it will be shutdown!",
                         total_ngbs / now.elapsed().as_secs_f64()
                     );
-                    tcp_stream.shutdown(Shutdown::Both).unwrap();
                 }
                 Err(err) => {
                     println!("Failed to connect: {}", err);

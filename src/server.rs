@@ -2,13 +2,64 @@ pub mod proto;
 
 use crate::proto::{PerfRequest, WorkType};
 use argparse::{ArgumentParser, Store, StoreTrue};
+use std::io;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener};
+use std::time::{Duration, Instant, SystemTime};
+
+
+pub fn nonblocking_write_all(stream: &mut std::net::TcpStream, mut buf: &[u8]) -> io::Result<()> {
+    while !buf.is_empty() {
+        match stream.write(buf) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "failed to write whole buffer",
+                ));
+            }
+            Ok(n) => buf = &buf[n..],
+            Err(ref e)
+                if e.kind() == io::ErrorKind::Interrupted
+                    || e.kind() == io::ErrorKind::WouldBlock => {}
+            Err(e) => return Err(e),
+        }
+        std::thread::yield_now();
+    }
+    Ok(())
+}
+
+pub fn nonblocking_read_exact(
+    stream: &mut std::net::TcpStream,
+    mut buf: &mut [u8],
+) -> io::Result<()> {
+    while !buf.is_empty() {
+        match stream.read(buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                let tmp = buf;
+                buf = &mut tmp[n..];
+            }
+            Err(ref e)
+                if e.kind() == io::ErrorKind::Interrupted
+                    || e.kind() == io::ErrorKind::WouldBlock => {}
+            Err(e) => return Err(e),
+        }
+        std::thread::yield_now();
+    }
+    if !buf.is_empty() {
+        Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "failed to fill whole buffer",
+        ))
+    } else {
+        Ok(())
+    }
+}
 
 fn main() {
     let mut address = "0.0.0.0".to_string();
     let mut num_of_socks = 1;
-    const bucket_size: usize = 2 * 1024 * 1024;
+    const BUCKET_SIZE: usize = 1 * 1024 * 1024;
     {
         // this block limits scope of borrows by ap.refer() method
         let mut ap = ArgumentParser::new();
@@ -34,70 +85,28 @@ fn main() {
             // // let listen_to_address = format!("{}:0", *address);
             let listener = TcpListener::bind(listen_address).unwrap();
             let sockaddr = listener.local_addr().unwrap();
-            let mut bucket: Vec<u8> = vec![0; bucket_size];
+            let mut bucket: Vec<u8> = vec![0; BUCKET_SIZE];
 
             // let mut bucket: [u8; bucket_size] = [0; bucket_size];
             println!("Listening on {:?}", sockaddr);
-            for stream in listener.incoming() {
-                match stream {
-                    Ok(mut stream) => {
-                        println!("New connection: {}", stream.peer_addr().unwrap());
-                        let mut data = [0 as u8; 1024]; // using 50 byte buffer
-                        let mut data = vec![0 as u8; bucket_size]; // using 10M byte buffer
-                                                                   // stream.set_nonblocking(true).expect("set_nonblocking call failed");
+            while match listener.accept() {
+                Ok((mut stream, _)) => {
+                    stream.set_nodelay(true).unwrap();
+                    stream.set_nonblocking(true).unwrap();
 
-                        let target = PerfRequest {
-                            work_type: WorkType::Send,
-                        };
-                        let mut encoded: Vec<u8> = bincode::serialize(&target).unwrap();
-                        stream.read_exact(&mut encoded[..]).unwrap();
+                    for _ in 0..10000 {
+                        let target_nbytes = BUCKET_SIZE.to_be_bytes();
+                        nonblocking_write_all(&mut stream, &target_nbytes[..]).unwrap();
+                        nonblocking_write_all(&mut stream, &bucket[..BUCKET_SIZE]).unwrap();
+                    }
 
-                        let request: PerfRequest = bincode::deserialize(&encoded[..]).unwrap();
-                        println!("request={:?}", request);
-                        let mut total_nbytes = 0;
-                        loop {
-                            let nbytes = match request.work_type {
-                                WorkType::Send => {
-                                    match stream.write(&data[..]) {
-                                        Ok(nbytes) => {
-                                            if nbytes == 0 {
-                                                println!("stream.write 0 bytes, exit directly");
-                                                break
-                                            }
-                                            nbytes
-                                        },
-                                        Err(err) => {
-                                            println!("stream.write failed, err={:?}", err);
-                                            break
-                                        },
-                                    }
-                                },
-                                _ => {
-                                    match stream.read(&mut data[..]) {
-                                        Ok(nbytes) => {
-                                            if nbytes == 0 {
-                                                println!("stream.read 0 bytes, exit directly");
-                                                break
-                                            }
-                                            nbytes
-                                        },
-                                        Err(err) => {
-                                            println!("stream.write failed, err={:?}", err);
-                                            break
-                                        },
-                                    }
-                                },
-                            };
-                            total_nbytes += nbytes;
-                            // println!("total_nbytes={}", total_nbytes);
-                        };
-                        println!("Ready to disconnect, total_nbytes={}", total_nbytes);
-                    }
-                    Err(err) => {
-                        println!("Error: {}", err);
-                    }
+                    true
                 }
-            }
+                Err(err) => {
+                    println!("listener.accept failed, err={:?}", err);
+                    false
+                }
+            } {}
         }));
     }
 
