@@ -60,6 +60,7 @@ fn main() {
     let mut address = "127.0.0.1:63590".to_string();
     let mut num_of_socks = 1;
     let mut bucket_size: usize = 1 * (1024 as usize).pow(2);
+    let mut repeat = 10000;
     {
         // this block limits scope of borrows by ap.refer() method
         let mut ap = ArgumentParser::new();
@@ -68,6 +69,8 @@ fn main() {
             .add_option(&["--server_address"], Store, "Server address");
         ap.refer(&mut bucket_size)
             .add_option(&["--bucket_size"], Store, "Bucket size");
+        ap.refer(&mut repeat)
+            .add_option(&["--repeat"], Store, "repeat count");
         ap.parse_args_or_exit();
     }
 
@@ -82,7 +85,6 @@ fn main() {
                     // stream.set_nodelay(true).unwrap();
                     // stream.set_nonblocking(true).unwrap();
 
-                    let repeat = 10000;
                     let mut pb = ProgressBar::new(repeat);
 
                     let now = Instant::now();
@@ -98,6 +100,9 @@ fn main() {
                         pb.inc();
                     }
                     pb.finish();
+
+                    stream.write_all(&(0 as usize).to_be_bytes()[..]).unwrap();
+
                     println!("now.elapsed().as_secs_f64()={}", now.elapsed().as_secs_f64());
                     let total_ngbs = send_nbytes as f64 / (1024. as f64).powf(3.);
                     println!(

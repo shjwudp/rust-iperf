@@ -94,12 +94,14 @@ fn main() {
                     // stream.set_nodelay(true).unwrap();
                     // stream.set_nonblocking(true).unwrap();
 
-                    let repeat = 10000;
-                    for _ in 0..repeat {
+                    loop {
                         let mut target_nbytes = BUCKET_SIZE.to_be_bytes();
                         stream.read_exact(&mut target_nbytes[..]).unwrap();
                         // nonblocking_read_exact(&mut stream, &mut target_nbytes[..]).unwrap();
                         let target_nbytes = usize::from_be_bytes(target_nbytes);
+                        if target_nbytes == 0 {
+                            break
+                        }
                         stream.read_exact(&mut bucket[..target_nbytes]).unwrap();
                         // nonblocking_read_exact(&mut stream, &mut bucket[..target_nbytes])
                         //     .unwrap();
