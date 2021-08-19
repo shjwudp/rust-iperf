@@ -82,8 +82,8 @@ fn main() {
     for _ in 0..nstreams {
         match TcpStream::connect(server_address.clone()) {
             Ok(mut stream) => {
-                // stream.set_nodelay(true).unwrap();
-                // stream.set_nonblocking(true).unwrap();
+                stream.set_nodelay(true).unwrap();
+                stream.set_nonblocking(true).unwrap();
                 let bucket: Vec<u8> = vec![0; bucket_size];
                 let mut progress = multi_bar.create_bar(repeat);
 
@@ -92,10 +92,10 @@ fn main() {
                     let mut send_nbytes: usize = 0;
                     for _ in 0..repeat {
                         let target_nbytes = bucket_size.to_be_bytes();
-                        stream.write_all(&target_nbytes[..]).unwrap();
-                        // nonblocking_write_all(&mut stream, &target_nbytes[..]).unwrap();
-                        stream.write_all(&bucket[..bucket_size]).unwrap();
-                        // nonblocking_write_all(&mut stream, &bucket[..bucket_size]).unwrap();
+                        // stream.write_all(&target_nbytes[..]).unwrap();
+                        nonblocking_write_all(&mut stream, &target_nbytes[..]).unwrap();
+                        // stream.write_all(&bucket[..bucket_size]).unwrap();
+                        nonblocking_write_all(&mut stream, &bucket[..bucket_size]).unwrap();
         
                         send_nbytes += bucket_size;
                         progress.inc();

@@ -81,22 +81,22 @@ fn main() {
     println!("Listening on {:?}", sockaddr);
     while match listener.accept() {
         Ok((mut stream, _)) => {
-            // stream.set_nodelay(true).unwrap();
-            // stream.set_nonblocking(true).unwrap();
+            stream.set_nodelay(true).unwrap();
+            stream.set_nonblocking(true).unwrap();
 
             let mut bucket: Vec<u8> = vec![0; BUCKET_SIZE];
             workers.push(std::thread::spawn(move || {
                 loop {
                     let mut target_nbytes = BUCKET_SIZE.to_be_bytes();
-                    stream.read_exact(&mut target_nbytes[..]).unwrap();
-                    // nonblocking_read_exact(&mut stream, &mut target_nbytes[..]).unwrap();
+                    // stream.read_exact(&mut target_nbytes[..]).unwrap();
+                    nonblocking_read_exact(&mut stream, &mut target_nbytes[..]).unwrap();
                     let target_nbytes = usize::from_be_bytes(target_nbytes);
                     if target_nbytes == 0 {
                         break
                     }
-                    stream.read_exact(&mut bucket[..target_nbytes]).unwrap();
-                    // nonblocking_read_exact(&mut stream, &mut bucket[..target_nbytes])
-                    //     .unwrap();
+                    // stream.read_exact(&mut bucket[..target_nbytes]).unwrap();
+                    nonblocking_read_exact(&mut stream, &mut bucket[..target_nbytes])
+                        .unwrap();
                 }
             }));
 
