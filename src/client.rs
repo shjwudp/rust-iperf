@@ -6,7 +6,7 @@ use std::io;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::time::{Duration, Instant, SystemTime};
-use pbr::ProgressBar;
+use pbr::{ProgressBar, MultiBar};
 
 pub fn nonblocking_write_all(stream: &mut std::net::TcpStream, mut buf: &[u8]) -> io::Result<()> {
     while !buf.is_empty() {
@@ -58,9 +58,9 @@ pub fn nonblocking_read_exact(
 
 fn main() {
     let mut address = "127.0.0.1:63590".to_string();
-    let mut num_of_socks = 1;
     let mut bucket_size: usize = 1 * (1024 as usize).pow(2);
     let mut repeat = 10000;
+    let mut nstreams = 1;
     {
         // this block limits scope of borrows by ap.refer() method
         let mut ap = ArgumentParser::new();
@@ -71,22 +71,23 @@ fn main() {
             .add_option(&["--bucket_size"], Store, "Bucket size");
         ap.refer(&mut repeat)
             .add_option(&["--repeat"], Store, "repeat count");
+        ap.refer(&mut nstreams)
+            .add_option(&["--nstreams"], Store, "num of stream");
         ap.parse_args_or_exit();
     }
 
+    let multi_bar = MultiBar::new();
     let mut workers = Vec::new();
-    for _ in 0..num_of_socks {
-        let server_address = address.clone();
-        let mut bucket: Vec<u8> = vec![0; bucket_size];
-        workers.push(std::thread::spawn(move || {
-            let work_type = WorkType::Recv;
-            match TcpStream::connect(server_address.clone()) {
-                Ok(mut stream) => {
-                    // stream.set_nodelay(true).unwrap();
-                    // stream.set_nonblocking(true).unwrap();
+    let server_address = address.clone();
+    for _ in 0..nstreams {
+        match TcpStream::connect(server_address.clone()) {
+            Ok(mut stream) => {
+                // stream.set_nodelay(true).unwrap();
+                // stream.set_nonblocking(true).unwrap();
+                let bucket: Vec<u8> = vec![0; bucket_size];
+                let mut progress = multi_bar.create_bar(repeat);
 
-                    let mut pb = ProgressBar::new(repeat);
-
+                workers.push(std::thread::spawn(move || {
                     let now = Instant::now();
                     let mut send_nbytes: usize = 0;
                     for _ in 0..repeat {
@@ -95,26 +96,26 @@ fn main() {
                         // nonblocking_write_all(&mut stream, &target_nbytes[..]).unwrap();
                         stream.write_all(&bucket[..bucket_size]).unwrap();
                         // nonblocking_write_all(&mut stream, &bucket[..bucket_size]).unwrap();
-
+        
                         send_nbytes += bucket_size;
-                        pb.inc();
+                        progress.inc();
                     }
-                    pb.finish();
-
+                    progress.finish();
+        
                     stream.write_all(&(0 as usize).to_be_bytes()[..]).unwrap();
-
+        
                     println!("now.elapsed().as_secs_f64()={}", now.elapsed().as_secs_f64());
                     let total_ngbs = send_nbytes as f64 / (1024. as f64).powf(3.);
                     println!(
                         "speed={}, it will be shutdown!",
                         total_ngbs / now.elapsed().as_secs_f64()
                     );
-                }
-                Err(err) => {
-                    println!("Failed to connect: {}", err);
-                }
+                }));
             }
-        }));
+            Err(err) => {
+                println!("Failed to connect: {}", err);
+            }
+        }
     }
 
     for worker in workers {

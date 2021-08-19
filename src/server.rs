@@ -58,64 +58,55 @@ pub fn nonblocking_read_exact(
 
 fn main() {
     let mut address = "0.0.0.0".to_string();
-    let mut num_of_socks = 1;
     const BUCKET_SIZE: usize = 1 * (1024 as usize).pow(3);
     {
         // this block limits scope of borrows by ap.refer() method
         let mut ap = ArgumentParser::new();
         ap.set_description("tcp server.");
-        ap.refer(&mut num_of_socks).add_option(
-            &["-n", "--num_of_socks"],
-            Store,
-            "Number of sockets",
-        );
         ap.refer(&mut address)
             .add_option(&["--address"], Store, "Listening address");
         ap.parse_args_or_exit();
     }
-    println!("num_of_socks={}", num_of_socks);
 
     let mut workers = Vec::new();
-    for _ in 0..num_of_socks {
-        println!("hi there");
-        let listen_address = address.clone();
-        workers.push(std::thread::spawn(move || {
-            println!("listen_address={:?}", listen_address);
-            let listen_address = format!("{}:0", listen_address);
-            // // let listen_to_address = format!("{}:0", *address);
-            let listener = TcpListener::bind(listen_address).unwrap();
-            let sockaddr = listener.local_addr().unwrap();
+    let listen_address = address.clone();
+
+    println!("listen_address={:?}", listen_address);
+    let listen_address = format!("{}:0", listen_address);
+    // // let listen_to_address = format!("{}:0", *address);
+    let listener = TcpListener::bind(listen_address).unwrap();
+    let sockaddr = listener.local_addr().unwrap();
+
+    // let mut bucket: [u8; bucket_size] = [0; bucket_size];
+    println!("Listening on {:?}", sockaddr);
+    while match listener.accept() {
+        Ok((mut stream, _)) => {
+            // stream.set_nodelay(true).unwrap();
+            // stream.set_nonblocking(true).unwrap();
+
             let mut bucket: Vec<u8> = vec![0; BUCKET_SIZE];
-
-            // let mut bucket: [u8; bucket_size] = [0; bucket_size];
-            println!("Listening on {:?}", sockaddr);
-            while match listener.accept() {
-                Ok((mut stream, _)) => {
-                    // stream.set_nodelay(true).unwrap();
-                    // stream.set_nonblocking(true).unwrap();
-
-                    loop {
-                        let mut target_nbytes = BUCKET_SIZE.to_be_bytes();
-                        stream.read_exact(&mut target_nbytes[..]).unwrap();
-                        // nonblocking_read_exact(&mut stream, &mut target_nbytes[..]).unwrap();
-                        let target_nbytes = usize::from_be_bytes(target_nbytes);
-                        if target_nbytes == 0 {
-                            break
-                        }
-                        stream.read_exact(&mut bucket[..target_nbytes]).unwrap();
-                        // nonblocking_read_exact(&mut stream, &mut bucket[..target_nbytes])
-                        //     .unwrap();
+            workers.push(std::thread::spawn(move || {
+                loop {
+                    let mut target_nbytes = BUCKET_SIZE.to_be_bytes();
+                    stream.read_exact(&mut target_nbytes[..]).unwrap();
+                    // nonblocking_read_exact(&mut stream, &mut target_nbytes[..]).unwrap();
+                    let target_nbytes = usize::from_be_bytes(target_nbytes);
+                    if target_nbytes == 0 {
+                        break
                     }
+                    stream.read_exact(&mut bucket[..target_nbytes]).unwrap();
+                    // nonblocking_read_exact(&mut stream, &mut bucket[..target_nbytes])
+                    //     .unwrap();
+                }
+            }));
 
-                    true
-                }
-                Err(err) => {
-                    println!("listener.accept failed, err={:?}", err);
-                    false
-                }
-            } {}
-        }));
-    }
+            true
+        }
+        Err(err) => {
+            println!("listener.accept failed, err={:?}", err);
+            false
+        }
+    } {}
 
     for worker in workers {
         worker.join().unwrap();
