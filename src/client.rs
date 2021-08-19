@@ -117,6 +117,7 @@ fn main() {
             }
         }
     }
+    multi_bar.listen();
 
     for worker in workers {
         worker.join().unwrap();
