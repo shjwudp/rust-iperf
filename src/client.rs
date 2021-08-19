@@ -79,18 +79,20 @@ fn main() {
             let work_type = WorkType::Recv;
             match TcpStream::connect(server_address.clone()) {
                 Ok(mut stream) => {
-                    stream.set_nodelay(true).unwrap();
-                    stream.set_nonblocking(true).unwrap();
+                    // stream.set_nodelay(true).unwrap();
+                    // stream.set_nonblocking(true).unwrap();
 
                     let repeat = 10000;
                     let mut pb = ProgressBar::new(repeat);
 
                     let now = Instant::now();
                     let mut send_nbytes: usize = 0;
-                    for _ in 0..10000 {
+                    for _ in 0..repeat {
                         let target_nbytes = bucket_size.to_be_bytes();
-                        nonblocking_write_all(&mut stream, &target_nbytes[..]).unwrap();
-                        nonblocking_write_all(&mut stream, &bucket[..bucket_size]).unwrap();
+                        stream.write_all(&target_nbytes[..]).unwrap();
+                        // nonblocking_write_all(&mut stream, &target_nbytes[..]).unwrap();
+                        stream.write_all(&bucket[..bucket_size]).unwrap();
+                        // nonblocking_write_all(&mut stream, &bucket[..bucket_size]).unwrap();
 
                         send_nbytes += bucket_size;
                         pb.inc();

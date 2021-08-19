@@ -91,16 +91,18 @@ fn main() {
             println!("Listening on {:?}", sockaddr);
             while match listener.accept() {
                 Ok((mut stream, _)) => {
-                    stream.set_nodelay(true).unwrap();
-                    stream.set_nonblocking(true).unwrap();
+                    // stream.set_nodelay(true).unwrap();
+                    // stream.set_nonblocking(true).unwrap();
 
                     let repeat = 10000;
                     for _ in 0..repeat {
                         let mut target_nbytes = BUCKET_SIZE.to_be_bytes();
-                        nonblocking_read_exact(&mut stream, &mut target_nbytes[..]).unwrap();
+                        stream.read_exact(&mut target_nbytes[..]).unwrap();
+                        // nonblocking_read_exact(&mut stream, &mut target_nbytes[..]).unwrap();
                         let target_nbytes = usize::from_be_bytes(target_nbytes);
-                        nonblocking_read_exact(&mut stream, &mut bucket[..target_nbytes])
-                            .unwrap();
+                        stream.read_exact(&mut bucket[..target_nbytes]).unwrap();
+                        // nonblocking_read_exact(&mut stream, &mut bucket[..target_nbytes])
+                        //     .unwrap();
                     }
 
                     true
