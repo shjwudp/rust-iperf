@@ -10,11 +10,20 @@ path = "src/server.rs"
 name = "server"
 
 [[bin]]
+path = "src/kcp_server.rs"
+name = "kcp_server"
+
+[[bin]]
 path = "src/client.rs"
 name = "client"
+
+[[bin]]
+path = "src/kcp_client.rs"
+name = "kcp_client"
 
 [dependencies]
 argparse = "0.2.2"
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.0"
 pbr = "1.0"
+kcp = "0.4"
