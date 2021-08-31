@@ -2,13 +2,13 @@ pub mod proto;
 
 use crate::proto::{PerfRequest, WorkType};
 use argparse::{ArgumentParser, Store, StoreTrue};
+use pbr::{MultiBar, ProgressBar};
+use socket2::{Domain, Socket, Type};
 use std::io;
 use std::io::{Read, Write};
-use std::net::{Shutdown, TcpStream};
-use std::time::{Duration, Instant, SystemTime};
-use pbr::{ProgressBar, MultiBar};
+use std::net::{Shutdown, TcpStream, SocketAddr};
 use std::sync::{Arc, Mutex};
-
+use std::time::{Duration, Instant, SystemTime};
 
 struct KcpOutput {
     socket: Arc<Mutex<std::net::UdpSocket>>,
@@ -30,9 +30,28 @@ impl Write for KcpOutput {
     }
 }
 
+struct UdpOutput {
+    socket: std::net::UdpSocket,
+    src: std::net::SocketAddr,
+}
+
+impl Write for UdpOutput {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        Ok(self
+            .socket
+            .send(data)
+            .unwrap())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+
 fn main() {
     let mut address = "127.0.0.1:63590".to_string();
-    let mut bucket_size: usize = 128;
+    let mut bucket_size: usize = 1024;
     let mut repeat = 1000000;
     let mut nstreams = 1;
     {
@@ -56,20 +75,44 @@ fn main() {
         let bucket: Vec<u8> = vec![0; bucket_size];
         let mut progress = multi_bar.create_bar(repeat);
 
-        let socket = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
-        socket.connect(address.clone()).unwrap();
-        let server_sockaddr = socket.peer_addr().unwrap();
-        let socket = Arc::new(Mutex::new(socket));
-
-        let mut kcp_handle = kcp::Kcp::new(
-            0x11223344,
-            KcpOutput {
-                socket: socket.clone(),
-                src: server_sockaddr,
+        let addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
+        let socket = Socket::new(
+            match addr {
+                SocketAddr::V4(_) => Domain::IPV4,
+                SocketAddr::V6(_) => Domain::IPV6,
             },
+            Type::DGRAM,
+            None,
+        )
+        .unwrap();
+        socket.bind(&addr.into()).unwrap();
+        let server_sockaddr: SocketAddr = address.parse().expect(&format!("address={}", address));
+        socket.connect(&server_sockaddr.into()).unwrap();
+        socket.set_send_buffer_size(4194304).unwrap();
+        socket.set_recv_buffer_size(4194304).unwrap();
+        println!(
+            "send_buffer_size={}, recv_buffer_size={}",
+            socket.send_buffer_size().unwrap(),
+            socket.recv_buffer_size().unwrap()
         );
-        kcp_handle.set_nodelay(true, 10, 2, true);
-        kcp_handle.set_fast_resend(1);
+        let socket: std::net::UdpSocket = socket.into();
+
+        let mut socket = UdpOutput{
+            socket,
+            src: server_sockaddr,
+        };
+
+        // let socket = Arc::new(Mutex::new(socket));
+
+        // let mut kcp_handle = kcp::Kcp::new_stream(
+        //     0x11223344,
+        //     KcpOutput {
+        //         socket: socket.clone(),
+        //         src: server_sockaddr,
+        //     },
+        // );
+        // kcp_handle.set_nodelay(true, 10, 2, true);
+        // kcp_handle.set_fast_resend(1);
 
         workers.push(std::thread::spawn(move || {
             let now = Instant::now();
@@ -77,17 +120,24 @@ fn main() {
             for _ in 0..repeat {
                 let target_nbytes = bucket_size.to_be_bytes();
 
-                kcp_handle.send(&target_nbytes[..]).unwrap();
-                kcp_handle.send(&bucket[..bucket_size]).unwrap();
+                socket.write_all(&target_nbytes[..]).unwrap();
+                socket.write_all(&bucket[..bucket_size]).unwrap();
+
+                // kcp_handle.send(&target_nbytes[..]).unwrap();
+                // kcp_handle.send(&bucket[..bucket_size]).unwrap();
 
                 send_nbytes += bucket_size;
                 progress.inc();
             }
             progress.finish();
 
-            kcp_handle.send(&(0 as usize).to_be_bytes()[..]).unwrap();
+            socket.write_all(&(0 as usize).to_be_bytes()[..]).unwrap();
+            // kcp_handle.send(&(0 as usize).to_be_bytes()[..]).unwrap();
 
-            println!("now.elapsed().as_secs_f64()={}", now.elapsed().as_secs_f64());
+            println!(
+                "now.elapsed().as_secs_f64()={}",
+                now.elapsed().as_secs_f64()
+            );
             let total_ngbs = send_nbytes as f64 / (1024. as f64).powf(3.);
             println!(
                 "speed={}, it will be shutdown!",
