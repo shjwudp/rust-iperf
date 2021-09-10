@@ -22,7 +22,7 @@ impl Read for KcpOutput {
 
 fn main() {
     let mut address = "0.0.0.0".to_string();
-    const BUCKET_SIZE: usize = 1 * (1024 as usize).pow(3);
+    const BUCKET_SIZE: usize = 64 * 1024;
     {
         // this block limits scope of borrows by ap.refer() method
         let mut ap = ArgumentParser::new();
@@ -89,28 +89,14 @@ fn main() {
     // let mut bucket: Vec<u8> = vec![0; BUCKET_SIZE];
     // let kcp2 = kcp_handle.clone();
 
+    let mut log_count = 0;
     workers.push(std::thread::spawn(move || loop {
-        let (_, src) = socket.peek_from(&mut bucket).unwrap();
-        let mut socket = KcpOutput {
-            socket: socket.clone(),
-            src,
-        };
-        loop {
-            let mut target_nbytes = BUCKET_SIZE.to_be_bytes();
-            socket.read_exact(&mut target_nbytes[..]).unwrap();
-            // kcp2.lock().unwrap().recv(&mut target_nbytes[..]).unwrap();
-            let target_nbytes = usize::from_be_bytes(target_nbytes);
-            if target_nbytes == 0 {
-                break;
-            }
-            socket.read_exact(&mut bucket[..target_nbytes]).unwrap();
-        }
-        // kcp2.lock()
-        //     .unwrap()
-        //     .recv(&mut bucket[..target_nbytes])
-        //     .unwrap();
+        let (recv_bytes, src_addr) = socket.recv_from(&mut bucket[..]).unwrap();
 
-        // std::thread::yield_now();
+        log_count += 1;
+        if log_count % 100000 == 0 {
+            println!("src_addr={:?}, recv_bytes={}", src_addr, recv_bytes);
+        }
     }));
 
     for worker in workers {

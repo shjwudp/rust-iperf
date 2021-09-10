@@ -6,7 +6,7 @@ use pbr::{MultiBar, ProgressBar};
 use socket2::{Domain, Socket, Type};
 use std::io;
 use std::io::{Read, Write};
-use std::net::{Shutdown, TcpStream, SocketAddr};
+use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -37,10 +37,7 @@ struct UdpOutput {
 
 impl Write for UdpOutput {
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        Ok(self
-            .socket
-            .send(data)
-            .unwrap())
+        Ok(self.socket.send(data).unwrap())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -48,11 +45,10 @@ impl Write for UdpOutput {
     }
 }
 
-
 fn main() {
     let mut address = "127.0.0.1:63590".to_string();
-    let mut bucket_size: usize = 1024;
-    let mut repeat = 1000000;
+    let mut bucket_size: usize = 32768;
+    let mut repeat = 100000;
     let mut nstreams = 1;
     {
         // this block limits scope of borrows by ap.refer() method
@@ -69,11 +65,11 @@ fn main() {
         ap.parse_args_or_exit();
     }
 
-    let multi_bar = MultiBar::new();
+    // let multi_bar = MultiBar::new();
     let mut workers = Vec::new();
     for _ in 0..nstreams {
         let bucket: Vec<u8> = vec![0; bucket_size];
-        let mut progress = multi_bar.create_bar(repeat);
+        // let mut progress = multi_bar.create_bar(repeat);
 
         let addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
         let socket = Socket::new(
@@ -97,42 +93,19 @@ fn main() {
         );
         let socket: std::net::UdpSocket = socket.into();
 
-        let mut socket = UdpOutput{
+        let mut socket = UdpOutput {
             socket,
             src: server_sockaddr,
         };
-
-        // let socket = Arc::new(Mutex::new(socket));
-
-        // let mut kcp_handle = kcp::Kcp::new_stream(
-        //     0x11223344,
-        //     KcpOutput {
-        //         socket: socket.clone(),
-        //         src: server_sockaddr,
-        //     },
-        // );
-        // kcp_handle.set_nodelay(true, 10, 2, true);
-        // kcp_handle.set_fast_resend(1);
 
         workers.push(std::thread::spawn(move || {
             let now = Instant::now();
             let mut send_nbytes: usize = 0;
             for _ in 0..repeat {
-                let target_nbytes = bucket_size.to_be_bytes();
-
-                socket.write_all(&target_nbytes[..]).unwrap();
                 socket.write_all(&bucket[..bucket_size]).unwrap();
 
-                // kcp_handle.send(&target_nbytes[..]).unwrap();
-                // kcp_handle.send(&bucket[..bucket_size]).unwrap();
-
                 send_nbytes += bucket_size;
-                progress.inc();
             }
-            progress.finish();
-
-            socket.write_all(&(0 as usize).to_be_bytes()[..]).unwrap();
-            // kcp_handle.send(&(0 as usize).to_be_bytes()[..]).unwrap();
 
             println!(
                 "now.elapsed().as_secs_f64()={}",
@@ -143,9 +116,9 @@ fn main() {
                 "speed={}, it will be shutdown!",
                 total_ngbs / now.elapsed().as_secs_f64()
             );
-        }))
+        }));
     }
-    multi_bar.listen();
+    // multi_bar.listen();
 
     for worker in workers {
         worker.join().unwrap();
