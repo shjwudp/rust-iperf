@@ -21,7 +21,17 @@ name = "client"
 path = "src/kcp_client.rs"
 name = "kcp_client"
 
+[[bin]]
+path = "src/smoltcp_client.rs"
+name = "smoltcp_client"
+
+[[bin]]
+path = "src/smoltcp_server.rs"
+name = "smoltcp_server"
+
 [dependencies]
+nix = "0.22.1"
+tracing = "0.1"
 argparse = "0.2.2"
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.0"
@@ -29,3 +39,4 @@ pbr = "1.0"
 kcp = "0.4"
 mio = "0.7"
 socket2 = "0.4"
+smoltcp = { version = "0.7", features = ["socket-raw", "socket-udp"] }

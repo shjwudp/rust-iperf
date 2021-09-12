@@ -55,8 +55,8 @@ fn main() {
         socket.send_buffer_size().unwrap(),
         socket.recv_buffer_size().unwrap()
     );
-    socket.set_send_buffer_size(4194304).unwrap();
-    socket.set_recv_buffer_size(4194304).unwrap();
+    socket.set_send_buffer_size(33554432).unwrap();
+    socket.set_recv_buffer_size(33554432).unwrap();
 
     let socket: std::net::UdpSocket = socket.into();
     let sockaddr = socket.local_addr().unwrap();

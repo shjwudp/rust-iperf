@@ -84,8 +84,8 @@ fn main() {
         socket.bind(&addr.into()).unwrap();
         let server_sockaddr: SocketAddr = address.parse().expect(&format!("address={}", address));
         socket.connect(&server_sockaddr.into()).unwrap();
-        socket.set_send_buffer_size(4194304).unwrap();
-        socket.set_recv_buffer_size(4194304).unwrap();
+        socket.set_send_buffer_size(33554432).unwrap();
+        socket.set_recv_buffer_size(33554432).unwrap();
         println!(
             "send_buffer_size={}, recv_buffer_size={}",
             socket.send_buffer_size().unwrap(),
