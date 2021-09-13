@@ -14,6 +14,19 @@ struct KcpOutput {
     src: std::net::SocketAddr,
 }
 
+impl Write for KcpOutput {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        Ok(self
+            .socket
+            .send_to(data, &self.src)
+            .unwrap())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 impl Read for KcpOutput {
     fn read(&mut self, data: &mut [u8]) -> io::Result<usize> {
         Ok(self.socket.recv(data).unwrap())
@@ -55,26 +68,27 @@ fn main() {
         socket.send_buffer_size().unwrap(),
         socket.recv_buffer_size().unwrap()
     );
-    socket.set_send_buffer_size(33554432).unwrap();
-    socket.set_recv_buffer_size(33554432).unwrap();
+    socket.set_send_buffer_size(4194304).unwrap();
+    socket.set_recv_buffer_size(4194304).unwrap();
 
     let socket: std::net::UdpSocket = socket.into();
     let sockaddr = socket.local_addr().unwrap();
     println!("Listening on {:?}", sockaddr);
 
     let mut bucket: Vec<u8> = vec![0; BUCKET_SIZE];
+    let (_, peer_addr) = socket.peek_from(&mut bucket).unwrap();
 
     let socket = Arc::new(socket);
-    // let socket = Arc::new(Mutex::new(socket));
-    // let mut kcp_handle = kcp::Kcp::new_stream(
-    //     0x11223344,
-    //     KcpOutput {
-    //         socket: socket.clone(),
-    //         src,
-    //     },
-    // );
-    // kcp_handle.set_nodelay(true, 10, 2, true);
-    // kcp_handle.set_rx_minrto(10);
+    let mut kcp_handle = kcp::Kcp::new_stream(
+        0x11223344,
+        KcpOutput {
+            socket: socket.clone(),
+            src: peer_addr,
+        },
+    );
+    kcp_handle.set_wndsize(128, 128);
+    kcp_handle.set_nodelay(true, 10, 2, true);
+    kcp_handle.set_rx_minrto(10);
     // let kcp_handle = Arc::new(Mutex::new(kcp_handle));
     // let kcp1 = kcp_handle.clone();
     // workers.push(std::thread::spawn(move || {
@@ -92,6 +106,7 @@ fn main() {
     let mut log_count = 0;
     workers.push(std::thread::spawn(move || loop {
         let (recv_bytes, src_addr) = socket.recv_from(&mut bucket[..]).unwrap();
+        kcp_handle.input(&bucket[..recv_bytes]).unwrap();
 
         log_count += 1;
         if log_count % 100000 == 0 {

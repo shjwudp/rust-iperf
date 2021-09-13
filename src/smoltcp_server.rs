@@ -1,6 +1,5 @@
-pub mod proto;
+pub mod utils;
 
-use crate::proto::{PerfRequest, WorkType};
 use argparse::{ArgumentParser, Store, StoreTrue};
 use smoltcp::socket::{UdpPacketMetadata, UdpSocket, UdpSocketBuffer};
 use socket2::{Domain, Socket, Type};
@@ -9,6 +8,7 @@ use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
+use smoltcp::wire::{IpAddress, IpCidr};
 
 struct KcpOutput {
     socket: Arc<std::net::UdpSocket>,
@@ -55,8 +55,9 @@ fn main() {
     udp_socket.bind(sockaddr).unwrap();
     println!("Listening on {:?}", udp_socket.endpoint());
 
-    let mut bucket: Vec<u8> = vec![0; BUCKET_SIZE];
+    let cidrs: Vec<IpCidr> = utils::find_interfaces().iter().map(|x| x.ip_cidr).collect();
 
+    let mut bucket: Vec<u8> = vec![0; BUCKET_SIZE];
     let mut log_count = 0;
     workers.push(std::thread::spawn(move || loop {
         let (recv_bytes, src_addr) = match udp_socket.recv_slice(&mut bucket[..]) {

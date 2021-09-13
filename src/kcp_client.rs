@@ -11,31 +11,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 struct KcpOutput {
-    socket: Arc<Mutex<std::net::UdpSocket>>,
-    src: std::net::SocketAddr,
+    socket: std::net::UdpSocket,
 }
 
 impl Write for KcpOutput {
-    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        Ok(self
-            .socket
-            .lock()
-            .unwrap()
-            .send_to(data, &self.src)
-            .unwrap())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-struct UdpOutput {
-    socket: std::net::UdpSocket,
-    src: std::net::SocketAddr,
-}
-
-impl Write for UdpOutput {
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
         Ok(self.socket.send(data).unwrap())
     }
@@ -84,8 +63,8 @@ fn main() {
         socket.bind(&addr.into()).unwrap();
         let server_sockaddr: SocketAddr = address.parse().expect(&format!("address={}", address));
         socket.connect(&server_sockaddr.into()).unwrap();
-        socket.set_send_buffer_size(33554432).unwrap();
-        socket.set_recv_buffer_size(33554432).unwrap();
+        socket.set_send_buffer_size(4194304).unwrap();
+        socket.set_recv_buffer_size(4194304).unwrap();
         println!(
             "send_buffer_size={}, recv_buffer_size={}",
             socket.send_buffer_size().unwrap(),
@@ -93,16 +72,21 @@ fn main() {
         );
         let socket: std::net::UdpSocket = socket.into();
 
-        let mut socket = UdpOutput {
+        let mut socket = KcpOutput { socket };
+
+        let mut kcp_handle = kcp::Kcp::new(
+            0x11223344,
             socket,
-            src: server_sockaddr,
-        };
+        );
+        kcp_handle.set_wndsize(128, 128);
+        kcp_handle.set_nodelay(true, 10, 2, true);
+        kcp_handle.set_fast_resend(1);
 
         workers.push(std::thread::spawn(move || {
             let now = Instant::now();
             let mut send_nbytes: usize = 0;
             for _ in 0..repeat {
-                socket.write_all(&bucket[..bucket_size]).unwrap();
+                kcp_handle.send(&bucket[..bucket_size]).unwrap();
 
                 send_nbytes += bucket_size;
             }
