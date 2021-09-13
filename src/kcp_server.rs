@@ -109,7 +109,7 @@ fn main() {
         kcp_handle.input(&bucket[..recv_bytes]).unwrap();
 
         log_count += 1;
-        if log_count % 100000 == 0 {
+        if log_count % 1 == 0 {
             println!("src_addr={:?}, recv_bytes={}", src_addr, recv_bytes);
         }
     }));
