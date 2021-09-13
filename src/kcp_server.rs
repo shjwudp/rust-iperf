@@ -7,7 +7,7 @@ use std::io;
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 struct KcpOutput {
     socket: Arc<std::net::UdpSocket>,
@@ -86,9 +86,10 @@ fn main() {
             src: peer_addr,
         },
     );
-    kcp_handle.set_wndsize(128, 128);
+    kcp_handle.set_wndsize(65535, 65535);
     kcp_handle.set_nodelay(true, 10, 2, true);
     kcp_handle.set_rx_minrto(10);
+    kcp_handle.set_mtu(32768 * 2);
     // let kcp_handle = Arc::new(Mutex::new(kcp_handle));
     // let kcp1 = kcp_handle.clone();
     // workers.push(std::thread::spawn(move || {
@@ -105,11 +106,14 @@ fn main() {
 
     let mut log_count = 0;
     workers.push(std::thread::spawn(move || loop {
+        kcp_handle.update(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u32).unwrap();
+
         let (recv_bytes, src_addr) = socket.recv_from(&mut bucket[..]).unwrap();
         kcp_handle.input(&bucket[..recv_bytes]).unwrap();
+        kcp_handle.recv(&mut bucket[..]);
 
         log_count += 1;
-        if log_count % 1 == 0 {
+        if log_count % 10000 == 0 {
             println!("src_addr={:?}, recv_bytes={}", src_addr, recv_bytes);
         }
     }));

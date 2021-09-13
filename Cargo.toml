@@ -36,7 +36,7 @@ argparse = "0.2.2"
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.0"
 pbr = "1.0"
-kcp = "0.4"
+kcp = { path = "/Users/changjianbin/workstation/github.com/shjwudp/kcp" }
 mio = "0.7"
 socket2 = "0.4"
 smoltcp = { version = "0.7", features = ["socket-raw", "socket-udp"] }

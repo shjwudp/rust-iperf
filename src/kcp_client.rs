@@ -8,10 +8,10 @@ use std::io;
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 struct KcpOutput {
-    socket: std::net::UdpSocket,
+    socket: Arc<std::net::UdpSocket>,
 }
 
 impl Write for KcpOutput {
@@ -26,6 +26,7 @@ impl Write for KcpOutput {
 
 fn main() {
     let mut address = "127.0.0.1:63590".to_string();
+    let mut bucket_size: usize = 32768;
     let mut bucket_size: usize = 32768;
     let mut repeat = 100000;
     let mut nstreams = 1;
@@ -47,7 +48,7 @@ fn main() {
     // let multi_bar = MultiBar::new();
     let mut workers = Vec::new();
     for _ in 0..nstreams {
-        let bucket: Vec<u8> = vec![0; bucket_size];
+        let mut bucket: Vec<u8> = vec![0; bucket_size];
         // let mut progress = multi_bar.create_bar(repeat);
 
         let addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
@@ -71,24 +72,67 @@ fn main() {
             socket.recv_buffer_size().unwrap()
         );
         let socket: std::net::UdpSocket = socket.into();
-
-        let mut socket = KcpOutput { socket };
+        let socket = Arc::new(socket);
 
         let mut kcp_handle = kcp::Kcp::new(
             0x11223344,
-            socket,
+            KcpOutput {
+                socket: socket.clone(),
+            },
         );
-        kcp_handle.set_wndsize(128, 128);
+        kcp_handle.set_wndsize(65535, 65535);
         kcp_handle.set_nodelay(true, 10, 2, true);
         kcp_handle.set_fast_resend(1);
+        kcp_handle.set_mtu(bucket_size * 2).unwrap();
 
+        socket.set_nonblocking(true).unwrap();
+
+        let mut log_count = 0;
         workers.push(std::thread::spawn(move || {
             let now = Instant::now();
             let mut send_nbytes: usize = 0;
             for _ in 0..repeat {
-                kcp_handle.send(&bucket[..bucket_size]).unwrap();
+                kcp_handle
+                    .update(
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as u32,
+                    )
+                    .unwrap();
 
-                send_nbytes += bucket_size;
+                let send_size = kcp_handle.send(&bucket[..bucket_size]).unwrap();
+                send_nbytes += send_size;
+
+                loop {
+                    kcp_handle
+                        .update(
+                            SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_millis() as u32,
+                        )
+                        .unwrap();
+
+                    match socket.recv_from(&mut bucket[..]) {
+                        Ok((recv_nbytes, _)) => {
+                            // println!("recv it, recv_nbytes={}", recv_nbytes);
+                            kcp_handle.input(&bucket[..recv_nbytes]).unwrap();
+                            kcp_handle.recv(&mut bucket[..]);
+                        }
+                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            if kcp_handle.wait_snd() < 1024 {
+                                break;
+                            }
+                            continue;
+                        },
+                        Err(e) => panic!("Can't recv_from, err={:?}", e),
+                    }
+                }
+
+                // let (recv_nbytes, src) = socket.recv_from(&mut bucket[..]);
+                // kcp_handle.input(&bucket[..recv_nbytes]).unwrap();
+                // // kcp_handle.flush().unwrap();
             }
 
             println!(
